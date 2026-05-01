@@ -1,13 +1,13 @@
 {
 	"name": "kontxt-cli",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "CLI for packaging codebases into AI-ready context files.",
 	"main": "dist/index.js",
 	"type": "module",
 	"private": false,
 	"license": "UNLICENSED",
 	"bin": {
-		"kontxt-cli": "dist/index.js"
+		"kontxt": "dist/index.js"
 	},
 	"repository": {
 		"type": "git",

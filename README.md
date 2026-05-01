@@ -5,6 +5,10 @@
 The supported path is the extended pipeline.
 The old `-o` legacy flow still exists, but it is deprecated.
 
+For now:
+- the published npm package name is `kontxt-cli`
+- the installed CLI command is `kontxt`
+
 npm package:
 - [kontxt-cli](https://www.npmjs.com/package/kontxt-cli)
 
@@ -16,11 +20,15 @@ npm package:
 npm install -g kontxt-cli
 ```
 
+This installs the `kontxt` command globally from the `kontxt-cli` package.
+
 ### pnpm
 
 ```bash
 pnpm add -g kontxt-cli
 ```
+
+This installs the `kontxt` command globally from the `kontxt-cli` package.
 
 ### Verify
 
@@ -42,6 +50,8 @@ With pnpm:
 pnpm dlx kontxt-cli --help
 ```
 
+This runs the published `kontxt-cli` package directly without a global install.
+
 ## Requirements
 
 - Node.js 18 or newer
@@ -49,6 +59,8 @@ pnpm dlx kontxt-cli --help
 ## Usage
 
 Run `kontxt` inside the repository you want to package.
+
+The command name is `kontxt`, even though the npm package name is still `kontxt-cli`.
 
 ### Extended Summary
 
