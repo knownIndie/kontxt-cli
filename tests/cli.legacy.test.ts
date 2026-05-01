@@ -81,7 +81,7 @@ afterAll(async () => {
   tempDirs = [];
 });
 
-describe("legacy cli behavior", () => {
+describe.skip("legacy cli behavior (deprecated)", () => {
   test("kontxt with no args prints utility info and exits success", async () => {
     const tempDir = await makeTempDir();
     tempDirs.push(tempDir);

@@ -4,30 +4,18 @@ import { readFile as readFilefunc, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { globby } from "globby";
 import { getEncoding } from "js-tiktoken";
+import { getEffectiveIgnoreGlobs } from "./ignore-config.js";
 import type { FileEntry, TokenType } from "./types.js";
 
 export async function getFiles(directory: string): Promise<string[]> {
-  // Implementation of getFiles function
+  const ignorePatterns = await getEffectiveIgnoreGlobs(directory);
   const path = await globby(["**/*"], {
     cwd: directory,
     expandDirectories: true,
     gitignore: true,
-    ignore: [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/.cursor/**",
-      "**/.vscode/**",
-      "**/.idea/**",
-      "**/.DS_Store/**",
-      "**/bun.lock",
-      "**/bun.lockb",
-      "**/package-lock.json",
-      "**/yarn.lock",
-      "**/pnpm-lock.yaml",
-      "**/.gitattributes",
-      "**/.kontxt/**",
-    ], // Explicitly block the junk
+    ignore: ignorePatterns,
     dot: true,
+    onlyFiles: true,
   });
 
   return path;

@@ -1,100 +1,185 @@
 # kontxt-cli
 
-`kontxt` is a CLI utility that packages a codebase into AI-ready context.
+`kontxt` packages a codebase into AI-ready markdown context files.
 
-Current goal:
-- keep the existing legacy flow stable,
-- introduce `extended` architecture safely in phases,
-- avoid risky rewrite-in-place changes.
+The supported path is the extended pipeline.
+The old `-o` legacy flow still exists, but it is deprecated.
 
-## Current Behavior
+## Install
 
-### `kontxt`
-Prints a short utility message and exits.
-
-### `kontxt -o`
-Runs the legacy packaging flow and writes output with default dated naming:
-- `.kontxt/<DD-M-YYYY>-summary.md`
-
-### `kontxt -o <name>`
-Runs the legacy packaging flow and writes output as:
-- `.kontxt/<name>`
-
-`<name>` must be a filename only (no path segments like `nested/file.md`).
-
-## What the Legacy Flow Does
-
-When generation runs (`kontxt -o` or `kontxt -o <name>`), it:
-1. Discovers files with ignore rules.
-2. Reads file contents.
-3. Counts tokens using `cl100k_base` via `js-tiktoken`.
-4. Builds a directory tree representation.
-5. Writes a summary file under `.kontxt/`.
-
-The output includes:
-- a `<tree>` block,
-- repeated `<file path="...">...</file>` blocks.
-
-## CLI Usage
+### npm
 
 ```bash
-# info only
-kontxt
+npm install -g kontxt-cli
+```
 
-# generate with default dated filename
-kontxt -o
+### pnpm
 
-# generate with custom filename inside .kontxt/
-kontxt -o custom.md
+```bash
+pnpm add -g kontxt-cli
+```
 
-# help
+### Verify
+
+```bash
 kontxt --help
 ```
 
-## Project Structure
+### Run Without Global Install
 
-Current stable modules:
-- `src/cli/index.ts` - CLI parsing and top-level execution routing
-- `src/core/filter.ts` - file discovery and reading
-- `src/core/write.ts` - formatting tree/context and writing summary
-- `src/core/types.ts` - shared types
+With npm:
 
-Planned v2 modules will live under:
-- `src/core/extended/**`
+```bash
+npx kontxt-cli --help
+```
 
-This isolates new features from the legacy path.
+With pnpm:
 
-## Extended Thinking Model (Design Intent)
+```bash
+pnpm dlx kontxt-cli --help
+```
 
-The `extended` path is treated as a deterministic pipeline:
-1. collect inputs
-2. discover files
-3. read safely
-4. transform (skeleton-first unless raw requested)
-5. secure (redact by default unless forced)
-6. assemble output
-7. deliver + report
+## Requirements
 
-Key principles:
-- no hidden side effects between stages,
-- clear input/output contracts per stage,
-- testable stage isolation,
-- legacy fallback remains available during transition.
+- Node.js 18 or newer
 
-## Roadmap
+## Usage
 
-Detailed phased plan is tracked in:
-- [PHASES.md](./PHASES.md)
+Run `kontxt` inside the repository you want to package.
+
+### Extended Summary
+
+```bash
+kontxt -e
+```
+
+This runs the extended pipeline and writes a single summary file under:
+
+```text
+.kontxt/<DD-M-YYYY>-summary.md
+```
+
+You can also provide a custom file name:
+
+```bash
+kontxt -e -o custom.md
+```
+
+That writes:
+
+```text
+.kontxt/custom.md
+```
+
+### Extended Split Mode
+
+```bash
+kontxt -e --32k
+kontxt -e --64k
+kontxt -e --128k
+```
+
+This writes split summaries under:
+- `.kontxt/32k-token/`
+- `.kontxt/64k-token/`
+- `.kontxt/128k-token/`
+
+Generated files are deterministic:
+- `part-001.md`
+- `part-002.md`
+- `part-003.md`
+
+Split-mode rules:
+- must be used with `-e`
+- use only one split flag at a time
+- each part stays within the selected token budget based on the final rendered markdown
+- each part includes the full repository tree
+- each run removes old markdown part files in that split directory before writing the new set
+- `-o` cannot be combined with split mode
+
+### Tree Only
+
+```bash
+kontxt -t
+```
+
+This prints the repository tree in the terminal and does not write summary files.
+
+### Deprecated Legacy Mode
+
+```bash
+kontxt -o
+kontxt -o custom.md
+```
+
+This still works, but it is deprecated and should not be the path you rely on.
+
+## Typical Workflow
+
+1. Open the target repository in your terminal.
+2. Run `kontxt -e` for one full summary, or `kontxt -e --32k` / `--64k` / `--128k` for split output.
+3. Open the generated files in `.kontxt/`.
+4. Feed the output to your LLM or downstream tooling.
+
+## Ignore Rules
+
+`kontxt` respects `.gitignore` and `.kontxtignore`.
+
+If `.kontxtignore` does not exist, `kontxt` creates it automatically.
+
+Example `.kontxtignore`:
+
+```text
+dist
+coverage
+.env
+*.log
+```
+
+## CLI Reference
+
+```bash
+# help
+kontxt --help
+
+# extended single summary
+kontxt -e
+kontxt -e -o custom.md
+
+# extended split summary
+kontxt -e --32k
+kontxt -e --64k
+kontxt -e --128k
+
+# tree only
+kontxt -t
+
+# deprecated legacy mode
+kontxt -o
+kontxt -o custom.md
+```
 
 ## Development
 
+With npm:
+
 ```bash
-bun run build
-bun run lint
-bun test
+npm install
+npm run build
+npm test
 ```
 
-Notes:
-- build uses `tsup`,
-- lint/format use Biome,
-- tests are currently minimal and will expand during phase execution.
+With pnpm:
+
+```bash
+pnpm install
+pnpm run build
+pnpm test
+```
+
+Additional scripts:
+
+```bash
+npm run test:all
+npm run test:legacy:deprecated
+```

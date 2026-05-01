@@ -1,5 +1,7 @@
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { getFiles } from "./filter.js";
+import { ensureKontxtIgnoreFile } from "./ignore-config.js";
 import type { FileEntry, TreeNode } from "./types.js";
 
 export function buildTree(paths: string[]) {
@@ -47,25 +49,17 @@ export function formatTree(paths: string[]): string {
 }
 
 export async function getDirStructure(directory: string) {
-  const dirStructure = [] as string[];
-  const IGNORE_DIRS = new Set([
-    "node_modules",
-    ".git",
-    ".kontxt",
-    ".cursor",
-    ".vscode",
-    ".idea",
-    ".DS_Store",
+  const treeExcludedFileNames = new Set([
     "bun.lock",
     "bun.lockb",
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",
     ".gitattributes",
+    ".kontxtignore",
     ".gitignore",
     ".prettierignore",
     ".prettierconfig",
-    "dist",
   ]);
   const ignoreExtensions = new Set([
     "mp4",
@@ -82,33 +76,21 @@ export async function getDirStructure(directory: string) {
     "webp",
     "svg",
   ]);
-  const entries = await readdir(directory, {
-    recursive: true,
-    withFileTypes: true,
-  });
+  const files = await getFiles(directory);
+  const dirStructure = [] as string[];
 
-  for (const entry of entries) {
-    const parts = entry.parentPath
-      .replace(directory, "")
-      .split("/")
-      .filter(Boolean);
-    if (parts.some((p) => IGNORE_DIRS.has(p))) {
-      continue;
-    }
-    const extension = entry.name.split(".").pop();
+  for (const relativePath of files) {
+    const fileName = relativePath.split("/").pop();
+    const extension = fileName?.split(".").pop();
     if (extension && ignoreExtensions.has(extension)) {
       continue;
     }
-    if (entry.isDirectory()) continue;
-    if (IGNORE_DIRS.has(entry.name)) {
+    if (fileName && treeExcludedFileNames.has(fileName)) {
       continue;
     }
-    const relativePath = entry.parentPath
-      .replace(directory, "")
-      .concat(`/${entry.name}`)
-      .slice(1);
     dirStructure.push(relativePath);
   }
+
   return dirStructure;
 }
 
@@ -126,6 +108,7 @@ export async function createSummaryFile(
   content: string,
   outputFileName?: string,
 ): Promise<void> {
+  await ensureKontxtIgnoreFile(basedir);
   const fileName = resolveSummaryFileName(outputFileName);
   const kontxtDir = join(basedir, ".kontxt");
   const kontxtSummaryFileName = join(kontxtDir, fileName);

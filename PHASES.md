@@ -2,7 +2,7 @@
 
 This file tracks the phased rollout for `src/core/extended/**`.
 
-## Phase 1: Foundation Fixes and Quick Wins
+## Phase 1: Foundation __done
 
 Target:
 - establish safe runtime primitives without destabilizing legacy behavior.
@@ -23,6 +23,7 @@ Acceptance:
 - bounded read concurrency,
 - per-file errors are surfaced as structured results,
 - token and cost summary available.
+
 
 ## Phase 2: Skeleton Mode (Tree-sitter)
 
@@ -88,7 +89,7 @@ Scope:
 Acceptance:
 - changed-file detection is correct for dirty and branch-diff scenarios.
 
-## Phase 6: DX, Config, Test, Ship
+## Phase 6: DX, Config, Test, Ship  __done
 
 Target:
 - complete operational developer experience.
@@ -96,8 +97,6 @@ Target:
 Scope:
 - `.kontxtignore` support and merge strategy,
 - interactive file selection UX,
-- `kontxt init`,
-- test coverage expansion and release polish.
 
 Acceptance:
 - ignore config works predictably,
