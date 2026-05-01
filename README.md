@@ -5,6 +5,9 @@
 The supported path is the extended pipeline.
 The old `-o` legacy flow still exists, but it is deprecated.
 
+npm package:
+- [kontxt-cli](https://www.npmjs.com/package/kontxt-cli)
+
 ## Install
 
 ### npm
