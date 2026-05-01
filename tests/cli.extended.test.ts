@@ -15,6 +15,10 @@ const repoRoot = resolve(import.meta.dir, "..");
 const cliPath = join(repoRoot, "dist", "index.js");
 let tempDirs: string[] = [];
 
+function makeTokenHeavyContent(minTokens: number): string {
+  return "token ".repeat(minTokens);
+}
+
 function runNode(args: string[], cwd: string): Promise<RunResult> {
   return new Promise((resolveRun) => {
     const proc = spawn(process.execPath, args, { cwd });
@@ -142,5 +146,75 @@ describe("extended cli behavior", () => {
     expect(result.code).toBe(1);
     const combinedOutput = `${result.stdout}\n${result.stderr}`;
     expect(combinedOutput).toContain("only a filename is allowed");
+  });
+
+  test("kontxt -e --32k creates split outputs and not the single summary file", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    const content = makeTokenHeavyContent(20_000);
+    await writeFixtureFile(tempDir, "src/a.ts", content);
+    await writeFixtureFile(tempDir, "src/b.ts", content);
+
+    const result = await runCliWithFrozenDate(tempDir, ["-e", "--32k"]);
+
+    expect(result.code).toBe(0);
+    expect(existsSync(join(tempDir, ".kontxt", "32k-token", "part-001.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(tempDir, ".kontxt", "32k-token", "part-002.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(tempDir, ".kontxt", "6-4-2026-summary.md"))).toBe(false);
+    expect(result.stdout).toContain("Split Directory");
+    expect(result.stdout).toContain("Split Budget: 32k");
+    expect(result.stdout).toContain("Summary Parts: 2");
+  });
+
+  test("kontxt -e split flags route to the correct directories", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+    await writeFixtureFile(tempDir, "src/a.ts", "export const a = 1;");
+
+    const result64 = await runCliWithFrozenDate(tempDir, ["-e", "--64k"]);
+    const result128 = await runCliWithFrozenDate(tempDir, ["-e", "--128k"]);
+
+    expect(result64.code).toBe(0);
+    expect(result128.code).toBe(0);
+    expect(existsSync(join(tempDir, ".kontxt", "64k-token", "part-001.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(tempDir, ".kontxt", "128k-token", "part-001.md"))).toBe(
+      true,
+    );
+  });
+
+  test("kontxt --32k without -e exits non-zero with a usage error", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+    await writeFixtureFile(tempDir, "src/a.ts", "export const a = 1;");
+
+    const result = await runCliWithFrozenDate(tempDir, ["--32k"]);
+
+    expect(result.code).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("require -e");
+  });
+
+  test("kontxt -e --32k cannot be combined with -o", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+    await writeFixtureFile(tempDir, "src/a.ts", "export const a = 1;");
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--32k",
+      "-o",
+      "custom.md",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(
+      "cannot be combined with -o/--output",
+    );
   });
 });

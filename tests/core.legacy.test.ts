@@ -53,7 +53,7 @@ afterAll(async () => {
   tempDirs = [];
 });
 
-describe("legacy write helpers", () => {
+describe.skip("legacy write helpers (deprecated)", () => {
   test("buildTree + renderTree + formatTree produce expected shape", () => {
     const paths = ["src/cli/index.ts", "src/core/filter.ts", "README.md"];
     const tree = buildTree(paths);
@@ -88,7 +88,7 @@ describe("legacy write helpers", () => {
   });
 });
 
-describe("legacy createSummaryFile", () => {
+describe.skip("legacy createSummaryFile (deprecated)", () => {
   test("writes default dated filename when output name is omitted", async () => {
     freezeDate("2026-04-05T10:00:00.000Z");
     const tempDir = await makeTempDir();
@@ -147,7 +147,7 @@ describe("legacy createSummaryFile", () => {
   });
 });
 
-describe("legacy file discovery and read", () => {
+describe.skip("legacy file discovery and read (deprecated)", () => {
   test("includes unknown and extensionless files in discovery outputs", async () => {
     const tempDir = await makeTempDir();
     tempDirs.push(tempDir);

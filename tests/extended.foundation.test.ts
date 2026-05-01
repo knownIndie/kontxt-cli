@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runExtendedPhaseOne } from "../src/core/extended/pipeline";
@@ -14,7 +15,10 @@ import { discoverFiles } from "../src/core/extended/foundation/discovery";
 import { buildRunReport } from "../src/core/extended/foundation/report";
 import { scanPath, scanPaths } from "../src/core/extended/foundation/read";
 import {
+  createSplitSummaryContents,
   resolveSummaryFileName,
+  resolveSplitDirectoryName,
+  writeSplitSummaryFiles,
   writeSummaryFile,
 } from "../src/core/extended/foundation/summary";
 import { countTokens } from "../src/core/extended/foundation/tokenize";
@@ -22,6 +26,18 @@ import { cleanupTempDir, makeTempDir, writeFixtureFile } from "./helpers/temp";
 
 const RealDate = Date;
 let tempDirs: string[] = [];
+
+function makeTokenHeavyContent(minTokens: number): string {
+  let repeatCount = minTokens;
+  let content = "token ".repeat(repeatCount);
+
+  while (countTokens(content) < minTokens) {
+    repeatCount = Math.ceil(repeatCount * 1.2);
+    content = "token ".repeat(repeatCount);
+  }
+
+  return content;
+}
 
 function freezeDate(isoDate: string) {
   const frozen = new RealDate(isoDate);
@@ -131,6 +147,117 @@ describe("extended foundation summary", () => {
     expect(ignoreContent).toContain("# .kontxtignore");
     expect(ignoreContent).toContain("Add glob patterns");
   });
+
+  test("createSplitSummaryContents is deterministic and keeps parts within budget", () => {
+    const files = [
+      {
+        relativePath: "src/c.ts",
+        absolutePath: "/tmp/src/c.ts",
+        sizeBytes: 1,
+        tokenCount: countTokens("export const c = 3;"),
+        content: "export const c = 3;",
+      },
+      {
+        relativePath: "src/a.ts",
+        absolutePath: "/tmp/src/a.ts",
+        sizeBytes: 1,
+        tokenCount: countTokens(makeTokenHeavyContent(20_000)),
+        content: makeTokenHeavyContent(20_000),
+      },
+      {
+        relativePath: "src/b.ts",
+        absolutePath: "/tmp/src/b.ts",
+        sizeBytes: 1,
+        tokenCount: countTokens(makeTokenHeavyContent(20_000)),
+        content: makeTokenHeavyContent(20_000),
+      },
+    ];
+
+    const first = createSplitSummaryContents(files, 32_000);
+    const second = createSplitSummaryContents([...files].reverse(), 32_000);
+
+    expect(first.length).toBeGreaterThan(1);
+    expect(first).toEqual(second);
+    for (const part of first) {
+      expect(countTokens(part)).toBeLessThanOrEqual(32_000);
+    }
+  });
+
+  test("createSplitSummaryContents fails when the full tree alone exceeds the budget", () => {
+    const files = Array.from({ length: 40 }, (_, index) => {
+      const path = `src/${"very-long-directory-name-".repeat(8)}${index}/file-${index}.ts`;
+      return {
+        relativePath: path,
+        absolutePath: `/tmp/${path}`,
+        sizeBytes: 1,
+        tokenCount: countTokens(""),
+        content: "",
+      };
+    });
+
+    expect(() => createSplitSummaryContents(files, 10)).toThrow(
+      "full repository tree alone uses",
+    );
+  });
+
+  test("createSplitSummaryContents fails when one file cannot fit in an empty part", () => {
+    const content = makeTokenHeavyContent(100);
+    const files = [
+      {
+        relativePath: "src/huge.ts",
+        absolutePath: "/tmp/src/huge.ts",
+        sizeBytes: content.length,
+        tokenCount: countTokens(content),
+        content,
+      },
+    ];
+
+    expect(() => createSplitSummaryContents(files, 20)).toThrow(
+      'File "src/huge.ts" cannot fit',
+    );
+  });
+
+  test("writeSplitSummaryFiles removes stale markdown parts before writing", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    const bigContent = makeTokenHeavyContent(20_000);
+    const smallContent = "export const small = true;";
+
+    const firstFiles = [
+      {
+        relativePath: "src/a.ts",
+        absolutePath: join(tempDir, "src/a.ts"),
+        sizeBytes: bigContent.length,
+        tokenCount: countTokens(bigContent),
+        content: bigContent,
+      },
+      {
+        relativePath: "src/b.ts",
+        absolutePath: join(tempDir, "src/b.ts"),
+        sizeBytes: bigContent.length,
+        tokenCount: countTokens(bigContent),
+        content: bigContent,
+      },
+    ];
+
+    const secondFiles = [
+      {
+        relativePath: "src/only.ts",
+        absolutePath: join(tempDir, "src/only.ts"),
+        sizeBytes: smallContent.length,
+        tokenCount: countTokens(smallContent),
+        content: smallContent,
+      },
+    ];
+
+    const firstRun = await writeSplitSummaryFiles(tempDir, firstFiles, 32000);
+    expect(firstRun.paths.length).toBeGreaterThan(1);
+
+    const secondRun = await writeSplitSummaryFiles(tempDir, secondFiles, 32000);
+    expect(secondRun.paths).toHaveLength(1);
+    expect(existsSync(join(secondRun.directory, "part-002.md"))).toBe(false);
+  });
 });
 
 describe("extended foundation read + report + pipeline", () => {
@@ -220,5 +347,31 @@ describe("extended foundation read + report + pipeline", () => {
     expect(result.report.modelCosts.some((item) => item.model === "openai/gpt-5.4")).toBe(
       true,
     );
+  });
+
+  test("runExtendedPhaseOne returns split output metadata", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    const content = makeTokenHeavyContent(20_000);
+    await writeFixtureFile(tempDir, "src/a.ts", content);
+    await writeFixtureFile(tempDir, "src/b.ts", content);
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      splitBudget: 32000,
+    });
+
+    expect(result.outputMode).toBe("split");
+    expect(result.summaryPath).toBeUndefined();
+    expect(result.splitBudget).toBe(32000);
+    expect(result.splitDirectory?.endsWith(`/.kontxt/${resolveSplitDirectoryName(32000)}`)).toBe(
+      true,
+    );
+    expect(result.summaryPaths?.length).toBeGreaterThan(1);
+    for (const summaryPath of result.summaryPaths ?? []) {
+      const fileContent = await readFile(summaryPath, "utf-8");
+      expect(countTokens(fileContent)).toBeLessThanOrEqual(32_000);
+    }
   });
 });
