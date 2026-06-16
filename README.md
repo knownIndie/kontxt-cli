@@ -2,6 +2,8 @@
 
 `kontxt` packages a codebase into AI-ready markdown context files.
 
+When feeding large repositories into LLMs (like ChatGPT, Claude, or Cursor), you often hit token limits or lose file context. `kontxt` solves this by packaging your entire codebase tree and file contents into clean, deterministic markdown files—even splitting them by token limits (--32k, --64k, --128k) so you can feed them to AI easily.
+
 The supported path is the extended pipeline.
 The old `-o` legacy flow still exists, but it is deprecated.
 
