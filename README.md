@@ -58,6 +58,14 @@ This runs the published `kontxt-cli` package directly without a global install.
 
 - Node.js 18 or newer
 
+## License
+
+Custom non-commercial source license. You can use, fork, modify, and share this
+project for non-commercial purposes, including pull requests and community
+collaboration. Commercial use, paid redistribution, sublicensing, resale, or
+use inside a paid product/service requires prior written permission. See
+[LICENSE](./LICENSE).
+
 ## Usage
 
 Run `kontxt` inside the repository you want to package.

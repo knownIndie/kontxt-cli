@@ -5,7 +5,7 @@
 	"main": "dist/index.js",
 	"type": "module",
 	"private": false,
-	"license": "UNLICENSED",
+	"license": "SEE LICENSE IN LICENSE",
 	"bin": {
 		"kontxt": "dist/index.js"
 	},
