@@ -3,8 +3,15 @@ import { getEffectiveIgnoreGlobs } from "../../ignore-config.js";
 import { DISCOVERY_PATTERNS } from "./constants.js";
 
 export async function discoverFiles(cwd: string): Promise<string[]> {
+  return filterExistingFiles(cwd, DISCOVERY_PATTERNS);
+}
+
+export async function filterExistingFiles(
+  cwd: string,
+  patterns: string[],
+): Promise<string[]> {
   const ignoreGlobs = await getEffectiveIgnoreGlobs(cwd);
-  const paths = await globby(DISCOVERY_PATTERNS, {
+  const paths = await globby(patterns, {
     cwd,
     expandDirectories: true,
     gitignore: true,

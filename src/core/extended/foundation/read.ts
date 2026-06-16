@@ -1,8 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { FileEntry, SkipReason } from "../../types.js";
-import { isBinaryFile } from "./binary.js";
+import { isBinaryBuffer, isBinaryFile } from "./binary.js";
 import { READ_CONCURRENCY_LIMIT } from "./constants.js";
+import { readGitBlob } from "./git.js";
 import { countTokens } from "./tokenize.js";
 
 type ExtendedSkipResult = {
@@ -120,6 +121,76 @@ export async function scanPaths(
         return;
       }
       results[currentIndex] = await scanPath(cwd, relativePaths[currentIndex]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+export async function scanGitBlobPath(
+  cwd: string,
+  gitRef: string,
+  relativePath: string,
+): Promise<ExtendedScanResult> {
+  try {
+    const contentBuffer = await readGitBlob(cwd, gitRef, relativePath);
+    if (isBinaryBuffer(contentBuffer)) {
+      return {
+        type: "skipped",
+        reason: "binary",
+        path: relativePath,
+      };
+    }
+
+    const content = contentBuffer.toString("utf-8");
+    const fileEntry: FileEntry = {
+      relativePath,
+      absolutePath: `${gitRef}:${relativePath}`,
+      sizeBytes: contentBuffer.byteLength,
+      tokenCount: countTokens(content),
+      content,
+    };
+
+    return {
+      type: "file",
+      file: fileEntry,
+    };
+  } catch (error) {
+    return {
+      type: "error",
+      path: relativePath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function scanGitBlobPaths(
+  cwd: string,
+  gitRef: string,
+  relativePaths: string[],
+  concurrency: number = READ_CONCURRENCY_LIMIT,
+): Promise<ExtendedScanResult[]> {
+  if (relativePaths.length === 0) {
+    return [];
+  }
+
+  const limit = Math.max(1, Math.min(concurrency, relativePaths.length));
+  const results: ExtendedScanResult[] = new Array(relativePaths.length);
+  let index = 0;
+
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const currentIndex = index;
+      index += 1;
+      if (currentIndex >= relativePaths.length) {
+        return;
+      }
+      results[currentIndex] = await scanGitBlobPath(
+        cwd,
+        gitRef,
+        relativePaths[currentIndex],
+      );
     }
   });
 
