@@ -2,12 +2,19 @@
 
 This file explains the current test suite, what each test file validates, and how to run tests reliably.
 
-## Test Files
+The supported implementation path is the extended pipeline. Legacy tests remain in the repository as historical/reference coverage, but they are skipped because legacy behavior is deprecated and should not drive new work.
 
-- `tests/core.legacy.test.ts`
-- `tests/cli.legacy.test.ts`
-- `tests/faultfinding.rigorous.test.ts`
+## Active Test Files
+
+- `tests/extended.foundation.test.ts`
+- `tests/cli.extended.test.ts`
 - `tests/helpers/temp.ts` (shared helper, not a test suite)
+
+## Legacy Reference Test Files
+
+- `tests/core.legacy.test.ts` (skipped)
+- `tests/cli.legacy.test.ts` (skipped)
+- `tests/faultfinding.rigorous.test.ts` (skipped)
 
 ## How To Run
 
@@ -17,12 +24,17 @@ Run all tests:
 bun test
 ```
 
+Run the supported extended suite:
+
+```bash
+bun test tests/extended.foundation.test.ts tests/cli.extended.test.ts
+```
+
 Run a single suite:
 
 ```bash
-bun test tests/core.legacy.test.ts
-bun test tests/cli.legacy.test.ts
-bun test tests/faultfinding.rigorous.test.ts
+bun test tests/extended.foundation.test.ts
+bun test tests/cli.extended.test.ts
 ```
 
 Recommended sanity checks after test updates:
@@ -34,7 +46,43 @@ bun run lint
 
 ## Suite Breakdown
 
-## `tests/core.legacy.test.ts`
+## `tests/extended.foundation.test.ts`
+
+Purpose: validate the extended pipeline's core foundation behavior.
+
+Coverage:
+- Binary detection using the null-byte sampling heuristic.
+- Deterministic token counting.
+- Summary filename resolution and validation.
+- Deterministic tree formatting.
+- Escaping file content that could break XML-like framing.
+- Writing summary files under `.kontxt/`.
+- Split summary generation within final rendered token budgets.
+- Stale split markdown cleanup.
+- Unified ignore behavior, including `.kontxtignore`.
+- Traversal protection.
+- Per-file read error isolation.
+- Extended pipeline report metadata.
+
+## `tests/cli.extended.test.ts`
+
+Purpose: smoke-test built CLI behavior for the supported extended path.
+
+Coverage:
+- `kontxt -t` prints tree-only output and does not write `.kontxt`.
+- `kontxt -e -o` creates the default dated summary file.
+- `kontxt -e -o <name>` appends `.md` when missing.
+- Invalid output path segments fail with a validation error.
+- `kontxt -e --32k`, `--64k`, and `--128k` route to split directories.
+- Split flags require `-e`.
+- Split flags cannot be combined with `-o`.
+
+Implementation details:
+- Builds `dist/index.js` in `beforeAll`.
+- Uses temp workspace directories for each test.
+- Uses a bootstrap runner with frozen `Date` for deterministic default filename assertions.
+
+## `tests/core.legacy.test.ts` (skipped)
 
 Purpose: validate deterministic legacy behavior of core functions.
 
@@ -59,7 +107,7 @@ Coverage:
 Time handling:
 - Date is frozen for deterministic default filename assertion.
 
-## `tests/cli.legacy.test.ts`
+## `tests/cli.legacy.test.ts` (skipped)
 
 Purpose: smoke-test built CLI behavior at process level.
 
@@ -74,7 +122,7 @@ Implementation details:
 - Uses temp workspace directories for each test.
 - Uses a bootstrap runner with frozen `Date` for deterministic `-o` default filename.
 
-## `tests/faultfinding.rigorous.test.ts`
+## `tests/faultfinding.rigorous.test.ts` (skipped)
 
 Purpose: stronger fault-finding/security-hardening expectations beyond current legacy baseline.
 
@@ -88,8 +136,8 @@ Checks included:
 - output filename control-character rejection
 
 Important:
-- This suite currently identifies gaps in legacy behavior.
-- It is intended as a rigorous target suite and may fail until those protections are implemented.
+- This suite identifies historical legacy gaps.
+- Do not use it as the acceptance target for new extended work unless a legacy gap is intentionally being ported into extended coverage.
 
 ## Helper: `tests/helpers/temp.ts`
 
@@ -102,6 +150,6 @@ This keeps tests isolated from repo state and avoids writing to source paths.
 
 ## Current Testing Model
 
-- Legacy baseline confidence: `core.legacy` + `cli.legacy`.
-- Hardening target confidence: `faultfinding.rigorous`.
-- Extended implementation work should progressively convert rigorous failures into passes.
+- Supported path confidence: `extended.foundation` + `cli.extended`.
+- Legacy suites are retained as reference material only.
+- New work should add or update extended tests, not legacy tests.

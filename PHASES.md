@@ -44,6 +44,10 @@ Acceptance:
 - bodies stripped where expected,
 - fallback works without pipeline break.
 
+Status:
+- TypeScript AST-backed JS/TS skeleton mode exists behind `--skeleton`,
+- Tree-sitter parser support is still not implemented.
+
 ## Phase 3: Budget Mode
 
 Target:
@@ -89,18 +93,25 @@ Scope:
 Acceptance:
 - changed-file detection is correct for dirty and branch-diff scenarios.
 
-## Phase 6: DX, Config, Test, Ship  __done
+Status:
+- first-pass dirty/staged/untracked file selection exists behind `--changed`,
+- staged-only file selection exists behind `--staged`,
+- stash path selection exists behind `--stash`,
+- branch diff file selection exists behind `--since <ref>`.
+
+## Phase 6: DX, Config, Test, Ship  __partial
 
 Target:
 - complete operational developer experience.
 
 Scope:
 - `.kontxtignore` support and merge strategy,
-- interactive file selection UX,
+- active extended test coverage,
+- publish-ready docs and metadata.
 
 Acceptance:
 - ignore config works predictably,
-- interactive selection is stable,
+- active extended tests cover the supported pipeline,
 - publish-ready docs and metadata are complete.
 
 ## Guiding Constraints Across All Phases

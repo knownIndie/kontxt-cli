@@ -73,7 +73,7 @@ kontxt -e
 This runs the extended pipeline and writes a single summary file under:
 
 ```text
-.kontxt/<DD-M-YYYY>-summary.md
+.kontxt/<DD-M-YYYY>-<mode>-summary.md
 ```
 
 You can also provide a custom file name:
@@ -102,9 +102,9 @@ This writes split summaries under:
 - `.kontxt/128k-token/`
 
 Generated files are deterministic:
-- `part-001.md`
-- `part-002.md`
-- `part-003.md`
+- `<DD-M-YYYY>-<mode>-part-001.md`
+- `<DD-M-YYYY>-<mode>-part-002.md`
+- `<DD-M-YYYY>-<mode>-part-003.md`
 
 Split-mode rules:
 - must be used with `-e`
@@ -113,6 +113,59 @@ Split-mode rules:
 - each part includes the full repository tree
 - each run removes old markdown part files in that split directory before writing the new set
 - `-o` cannot be combined with split mode
+
+Default output names include the active mode, for example:
+- `6-4-2026-full-summary.md`
+- `6-4-2026-changed-summary.md`
+- `6-4-2026-staged-skeleton-summary.md`
+- `6-4-2026-since-main-summary.md`
+
+### Changed Files Only
+
+```bash
+kontxt -e --changed
+```
+
+This packages only changed, staged, and untracked files reported by Git.
+
+Use this when you want context for local work that has not been committed or pushed yet.
+
+### Staged Files Only
+
+```bash
+kontxt -e --staged
+```
+
+This packages only files currently staged in Git.
+
+Use this when you have curated the exact changes you want reviewed.
+
+### Stash Files
+
+```bash
+kontxt -e --stash
+kontxt -e --stash 'stash@{1}'
+```
+
+This packages file contents directly from a Git stash ref.
+
+### Branch Diff Mode
+
+```bash
+kontxt -e --since main
+```
+
+This packages files changed on the current branch since the merge-base with the provided Git ref.
+
+Use this when you want context for branch work that is committed locally but not merged yet.
+
+### Skeleton Mode
+
+```bash
+kontxt -e --skeleton
+```
+
+This keeps lightweight JS/TS structure where supported: imports, declarations, class/function/type signatures, and test names. Unsupported files fall back to full content.
 
 ### Tree Only
 
@@ -167,6 +220,17 @@ kontxt -e -o custom.md
 kontxt -e --32k
 kontxt -e --64k
 kontxt -e --128k
+
+# changed files and skeleton mode
+kontxt -e --changed
+kontxt -e --staged
+kontxt -e --stash
+kontxt -e --since main
+kontxt -e --skeleton
+kontxt -e --changed --skeleton
+kontxt -e --staged --skeleton
+kontxt -e --stash --skeleton
+kontxt -e --since main --skeleton
 
 # tree only
 kontxt -t

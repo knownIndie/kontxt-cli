@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { cleanupTempDir, makeTempDir, writeFixtureFile } from "./helpers/temp";
 
 type RunResult = {
@@ -14,6 +15,7 @@ type RunResult = {
 const repoRoot = resolve(import.meta.dir, "..");
 const cliPath = join(repoRoot, "dist", "index.js");
 let tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 
 function makeTokenHeavyContent(minTokens: number): string {
   return "token ".repeat(minTokens);
@@ -94,11 +96,11 @@ describe("extended cli behavior", () => {
     const result = await runNode([cliPath, "-t"], tempDir);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Repository Tree");
+    expect(result.stdout).toContain("Repository tree");
     expect(result.stdout).toContain("src/");
     expect(result.stdout).toContain("tree.ts");
     expect(result.stdout).not.toContain("Model cost estimates");
-    expect(result.stdout).not.toContain("Estimated Input Cost");
+    expect(result.stdout).not.toContain("Input cost");
     expect(existsSync(join(tempDir, ".kontxt"))).toBe(false);
   });
 
@@ -110,14 +112,14 @@ describe("extended cli behavior", () => {
     const result = await runCliWithFrozenDate(tempDir, ["-e", "-o"]);
 
     expect(result.code).toBe(0);
-    const summaryPath = join(tempDir, ".kontxt", "6-4-2026-summary.md");
+    const summaryPath = join(tempDir, ".kontxt", "6-4-2026-full-summary.md");
     expect(existsSync(summaryPath)).toBe(true);
     const content = await readFile(summaryPath, "utf-8");
     expect(content).toContain('<file path="src/a.ts">');
-    expect(result.stdout).toContain("Skipped Files");
+    expect(result.stdout).toContain("Skipped files");
     expect(result.stdout).toContain("Model cost estimates");
-    expect(result.stdout).toContain("openai/gpt-5.4");
-    expect(result.stdout).toContain("anthropic/claude-opus-4.6");
+    expect(result.stdout).toContain("openai/gpt-5.5");
+    expect(result.stdout).toContain("anthropic/claude-opus-4.8");
     expect(result.stdout).toContain("google/gemini-2.5-flash");
   });
 
@@ -159,16 +161,18 @@ describe("extended cli behavior", () => {
     const result = await runCliWithFrozenDate(tempDir, ["-e", "--32k"]);
 
     expect(result.code).toBe(0);
-    expect(existsSync(join(tempDir, ".kontxt", "32k-token", "part-001.md"))).toBe(
-      true,
+    expect(
+      existsSync(join(tempDir, ".kontxt", "32k-token", "6-4-2026-full-part-001.md")),
+    ).toBe(true);
+    expect(
+      existsSync(join(tempDir, ".kontxt", "32k-token", "6-4-2026-full-part-002.md")),
+    ).toBe(true);
+    expect(existsSync(join(tempDir, ".kontxt", "6-4-2026-full-summary.md"))).toBe(
+      false,
     );
-    expect(existsSync(join(tempDir, ".kontxt", "32k-token", "part-002.md"))).toBe(
-      true,
-    );
-    expect(existsSync(join(tempDir, ".kontxt", "6-4-2026-summary.md"))).toBe(false);
-    expect(result.stdout).toContain("Split Directory");
-    expect(result.stdout).toContain("Split Budget: 32k");
-    expect(result.stdout).toContain("Summary Parts: 2");
+    expect(result.stdout).toContain("Split directory");
+    expect(result.stdout).toContain("Split budget");
+    expect(result.stdout).toContain("Summary parts");
   });
 
   test("kontxt -e split flags route to the correct directories", async () => {
@@ -181,12 +185,12 @@ describe("extended cli behavior", () => {
 
     expect(result64.code).toBe(0);
     expect(result128.code).toBe(0);
-    expect(existsSync(join(tempDir, ".kontxt", "64k-token", "part-001.md"))).toBe(
-      true,
-    );
-    expect(existsSync(join(tempDir, ".kontxt", "128k-token", "part-001.md"))).toBe(
-      true,
-    );
+    expect(
+      existsSync(join(tempDir, ".kontxt", "64k-token", "6-4-2026-full-part-001.md")),
+    ).toBe(true);
+    expect(
+      existsSync(join(tempDir, ".kontxt", "128k-token", "6-4-2026-full-part-001.md")),
+    ).toBe(true);
   });
 
   test("kontxt --32k without -e exits non-zero with a usage error", async () => {
@@ -215,6 +219,181 @@ describe("extended cli behavior", () => {
     expect(result.code).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain(
       "cannot be combined with -o/--output",
+    );
+  });
+
+  test("kontxt -e --skeleton writes skeleton content", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+    await writeFixtureFile(
+      tempDir,
+      "src/skeleton.ts",
+      [
+        "export function skeleton(value: string) {",
+        "  return value.toUpperCase();",
+        "}",
+      ].join("\n"),
+    );
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--skeleton",
+      "-o",
+      "skeleton",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Content mode");
+    const content = await readFile(
+      join(tempDir, ".kontxt", "skeleton.md"),
+      "utf-8",
+    );
+    expect(content).toContain("export function skeleton(value: string) { ... }");
+    expect(content).not.toContain("toUpperCase");
+  });
+
+  test("kontxt -e --since includes branch-diff files", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+    await execFileAsync("git", ["branch", "main"], { cwd: tempDir });
+
+    await writeFixtureFile(
+      tempDir,
+      "src/feature.ts",
+      "export const feature = true;",
+    );
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "feature"], { cwd: tempDir });
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--since",
+      "main",
+      "-o",
+      "since",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Input scope");
+    expect(result.stdout).toContain("git files since main");
+    const content = await readFile(join(tempDir, ".kontxt", "since.md"), "utf-8");
+    expect(content).toContain('<file path="src/feature.ts">');
+    expect(content).not.toContain('<file path="src/base.ts">');
+  });
+
+  test("kontxt -e --staged includes only staged files", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+
+    await writeFixtureFile(tempDir, "src/staged.ts", "export const staged = true;");
+    await writeFixtureFile(
+      tempDir,
+      "src/untracked.ts",
+      "export const untracked = true;",
+    );
+    await execFileAsync("git", ["add", "src/staged.ts"], { cwd: tempDir });
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--staged",
+      "-o",
+      "staged",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Input scope");
+    expect(result.stdout).toContain("staged git files");
+    const content = await readFile(join(tempDir, ".kontxt", "staged.md"), "utf-8");
+    expect(content).toContain('<file path="src/staged.ts">');
+    expect(content).not.toContain('<file path="src/untracked.ts">');
+  });
+
+  test("kontxt -e --stash includes latest stash files", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+
+    await writeFixtureFile(
+      tempDir,
+      "src/stashed.ts",
+      "export const stashed = 'from-stash';",
+    );
+    await execFileAsync("git", ["add", "src/stashed.ts"], { cwd: tempDir });
+    await execFileAsync("git", ["stash", "push", "--include-untracked", "-m", "stash-test"], {
+      cwd: tempDir,
+    });
+    await writeFixtureFile(
+      tempDir,
+      "src/stashed.ts",
+      "export const stashed = 'from-worktree';",
+    );
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--stash",
+      "-o",
+      "stash",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Input scope");
+    expect(result.stdout).toContain("git stash stash@{0}");
+    const content = await readFile(join(tempDir, ".kontxt", "stash.md"), "utf-8");
+    expect(content).toContain('<file path="src/stashed.ts">');
+    expect(content).toContain("from-stash");
+    expect(content).not.toContain("from-worktree");
+    expect(content).not.toContain('<file path="src/base.ts">');
+  });
+
+  test("kontxt -e --changed --since exits non-zero", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    const result = await runCliWithFrozenDate(tempDir, [
+      "-e",
+      "--changed",
+      "--since",
+      "main",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(
+      "Use only one git scope flag",
     );
   });
 });

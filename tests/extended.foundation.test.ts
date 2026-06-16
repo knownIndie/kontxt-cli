@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { runExtendedPhaseOne } from "../src/core/extended/pipeline";
 import {
   isBinaryBuffer,
@@ -15,6 +17,11 @@ import { discoverFiles } from "../src/core/extended/foundation/discovery";
 import { buildRunReport } from "../src/core/extended/foundation/report";
 import { scanPath, scanPaths } from "../src/core/extended/foundation/read";
 import {
+  createCodeSkeleton,
+  createSkeletonForPath,
+  skeletonizeFile,
+} from "../src/core/extended/foundation/skeleton";
+import {
   createSplitSummaryContents,
   resolveSummaryFileName,
   resolveSplitDirectoryName,
@@ -26,6 +33,7 @@ import { cleanupTempDir, makeTempDir, writeFixtureFile } from "./helpers/temp";
 
 const RealDate = Date;
 let tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 
 function makeTokenHeavyContent(minTokens: number): string {
   let repeatCount = minTokens;
@@ -99,7 +107,24 @@ describe("extended foundation binary + tokenize", () => {
 describe("extended foundation summary", () => {
   test("resolveSummaryFileName supports default/custom and rejects invalid names", () => {
     freezeDate("2026-04-06T10:00:00.000Z");
-    expect(resolveSummaryFileName()).toBe("6-4-2026-summary.md");
+    expect(resolveSummaryFileName()).toBe("6-4-2026-full-summary.md");
+    expect(resolveSummaryFileName(undefined, { scope: "changed" })).toBe(
+      "6-4-2026-changed-summary.md",
+    );
+    expect(
+      resolveSummaryFileName(undefined, {
+        scope: "since-main",
+        skeleton: true,
+      }),
+    ).toBe("6-4-2026-since-main-skeleton-summary.md");
+    expect(
+      resolveSummaryFileName(undefined, {
+        scope: "since-feature/context modes",
+      }),
+    ).toBe("6-4-2026-since-feature-context-modes-summary.md");
+    expect(resolveSummaryFileName(undefined, { scope: "stash" })).toBe(
+      "6-4-2026-stash-summary.md",
+    );
     expect(resolveSummaryFileName("custom")).toBe("custom.md");
     expect(resolveSummaryFileName("custom.md")).toBe("custom.md");
     expect(() => resolveSummaryFileName(" ")).toThrow("cannot be empty");
@@ -260,6 +285,135 @@ describe("extended foundation summary", () => {
   });
 });
 
+describe("extended foundation skeleton", () => {
+  test("createCodeSkeleton keeps imports, declarations, and test names", () => {
+    const skeleton = createCodeSkeleton(
+      [
+        'import { describe, test } from "bun:test";',
+        "const internal = 1;",
+        "export function runThing(input: string) {",
+        "  return input.toUpperCase();",
+        "}",
+        'test("runs the thing", () => {',
+        "  expect(runThing('a')).toBe('A');",
+        "});",
+      ].join("\n"),
+    );
+
+    expect(skeleton).toContain('import { describe, test } from "bun:test";');
+    expect(skeleton).toContain("export function runThing(input: string) { ... }");
+    expect(skeleton).toContain('test("runs the thing");');
+    expect(skeleton).not.toContain("toUpperCase");
+  });
+
+  test("createCodeSkeleton keeps multi-line function signatures without bodies", () => {
+    const skeleton = createCodeSkeleton(
+      [
+        "export async function createUser(",
+        "  id: string,",
+        "  options: { active: boolean },",
+        ") {",
+        "  await saveUser(id, options);",
+        "  return id;",
+        "}",
+        "const helper = (",
+        "  value: string,",
+        ") => {",
+        "  return value.trim();",
+        "};",
+      ].join("\n"),
+    );
+
+    expect(skeleton).toContain(
+      "export async function createUser( id: string, options: { active: boolean }, ) { ... }",
+    );
+    expect(skeleton).toContain("const helper = ( value: string, ) => { ... }");
+    expect(skeleton).not.toContain("saveUser");
+    expect(skeleton).not.toContain("value.trim");
+  });
+
+  test("createCodeSkeleton keeps only describe/test/it names", () => {
+    const skeleton = createCodeSkeleton(
+      [
+        'describe("pipeline", () => {',
+        '  test("writes changed files", async () => {',
+        "    await runPipeline();",
+        "  });",
+        '  it("skips ignored files", () => {',
+        "    expect(true).toBe(true);",
+        "  });",
+        "});",
+      ].join("\n"),
+    );
+
+    expect(skeleton).toContain('describe("pipeline");');
+    expect(skeleton).toContain('test("writes changed files");');
+    expect(skeleton).toContain('it("skips ignored files");');
+    expect(skeleton).not.toContain("runPipeline");
+    expect(skeleton).not.toContain("expect(true)");
+  });
+
+  test("createSkeletonForPath extracts class member signatures with TypeScript AST", () => {
+    const skeleton = createSkeletonForPath(
+      [
+        "export class UserService {",
+        "  private cache = new Map<string, string>();",
+        "",
+        "  constructor(private readonly endpoint: string) {}",
+        "",
+        "  async loadUser(",
+        "    id: string,",
+        "  ): Promise<string> {",
+        "    const response = await fetch(`${this.endpoint}/${id}`);",
+        "    return response.text();",
+        "  }",
+        "}",
+      ].join("\n"),
+      "src/service.ts",
+    );
+
+    expect(skeleton).toContain("export class UserService {");
+    expect(skeleton).toContain("private cache =;");
+    expect(skeleton).toContain(
+      "async loadUser( id: string, ): Promise<string> { ... }",
+    );
+    expect(skeleton).not.toContain("await fetch");
+    expect(skeleton).not.toContain("response.text");
+  });
+
+  test("createSkeletonForPath keeps exported constants but skips private literals", () => {
+    const skeleton = createSkeletonForPath(
+      [
+        "const privateValue = 1;",
+        "export const publicValue = { enabled: true };",
+        "export const loader = async (",
+        "  id: string,",
+        ") => {",
+        "  return load(id);",
+        "};",
+      ].join("\n"),
+      "src/constants.ts",
+    );
+
+    expect(skeleton).toContain("export const publicValue = { enabled: true };");
+    expect(skeleton).toContain("export const loader = async ( id: string, ) => { ... };");
+    expect(skeleton).not.toContain("privateValue");
+    expect(skeleton).not.toContain("load(id)");
+  });
+
+  test("skeletonizeFile leaves unsupported files unchanged", () => {
+    const file = {
+      relativePath: "README.md",
+      absolutePath: "/tmp/README.md",
+      sizeBytes: 7,
+      tokenCount: countTokens("# Read"),
+      content: "# Read",
+    };
+
+    expect(skeletonizeFile(file)).toEqual(file);
+  });
+});
+
 describe("extended foundation read + report + pipeline", () => {
   test("discoverFiles applies unified ignore policy including dist", async () => {
     const tempDir = await makeTempDir();
@@ -344,7 +498,7 @@ describe("extended foundation read + report + pipeline", () => {
     expect(content).not.toContain("src/blob.bin");
     expect(result.report.skippedByReason.binary).toBe(1);
     expect(result.report.modelCosts.length).toBeGreaterThan(0);
-    expect(result.report.modelCosts.some((item) => item.model === "openai/gpt-5.4")).toBe(
+    expect(result.report.modelCosts.some((item) => item.model === "openai/gpt-5.5")).toBe(
       true,
     );
   });
@@ -373,5 +527,210 @@ describe("extended foundation read + report + pipeline", () => {
       const fileContent = await readFile(summaryPath, "utf-8");
       expect(countTokens(fileContent)).toBeLessThanOrEqual(32_000);
     }
+  });
+
+  test("runExtendedPhaseOne can include only changed git files", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/tracked.ts", "export const old = 1;");
+    await execFileAsync("git", ["add", "src/tracked.ts"], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: tempDir });
+
+    await writeFixtureFile(tempDir, "src/tracked.ts", "export const changed = 2;");
+    await writeFixtureFile(tempDir, "src/new.ts", "export const fresh = 3;");
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "changed",
+      changedOnly: true,
+    });
+
+    const paths = result.files.map((file) => file.relativePath);
+    expect(paths).toEqual(["src/new.ts", "src/tracked.ts"]);
+    const content = await readFile(result.summaryPath, "utf-8");
+    expect(content).toContain('<file path="src/new.ts">');
+    expect(content).toContain('<file path="src/tracked.ts">');
+  });
+
+  test("changed git files still respect .kontxtignore", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, ".kontxtignore", "src/ignored.ts\n");
+    await writeFixtureFile(tempDir, "src/keep.ts", "export const keep = true;");
+    await writeFixtureFile(
+      tempDir,
+      "src/ignored.ts",
+      "export const ignored = true;",
+    );
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "changed-filtered",
+      changedOnly: true,
+    });
+
+    const paths = result.files.map((file) => file.relativePath);
+    expect(paths).toEqual(["src/keep.ts"]);
+  });
+
+  test("runExtendedPhaseOne can include only staged git files", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await writeFixtureFile(
+      tempDir,
+      "src/unstaged.ts",
+      "export const unstaged = false;",
+    );
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+
+    await writeFixtureFile(tempDir, "src/staged.ts", "export const staged = true;");
+    await writeFixtureFile(
+      tempDir,
+      "src/unstaged.ts",
+      "export const unstaged = true;",
+    );
+    await writeFixtureFile(
+      tempDir,
+      "src/untracked.ts",
+      "export const untracked = true;",
+    );
+    await execFileAsync("git", ["add", "src/staged.ts"], { cwd: tempDir });
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "staged",
+      stagedOnly: true,
+    });
+
+    const paths = result.files.map((file) => file.relativePath);
+    expect(paths).toEqual(["src/staged.ts"]);
+  });
+
+  test("runExtendedPhaseOne can include files selected from a git stash", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+
+    await writeFixtureFile(
+      tempDir,
+      "src/stashed.ts",
+      "export const stashed = 'from-stash';",
+    );
+    await execFileAsync("git", ["add", "src/stashed.ts"], { cwd: tempDir });
+    await execFileAsync("git", ["stash", "push", "--include-untracked", "-m", "stash-test"], {
+      cwd: tempDir,
+    });
+    await writeFixtureFile(
+      tempDir,
+      "src/stashed.ts",
+      "export const stashed = 'from-worktree';",
+    );
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "stash",
+      stashRef: "stash@{0}",
+    });
+
+    const paths = result.files.map((file) => file.relativePath);
+    expect(paths).toEqual(["src/stashed.ts"]);
+    expect(result.files[0].content).toContain("from-stash");
+    expect(result.files[0].content).not.toContain("from-worktree");
+  });
+
+  test("runExtendedPhaseOne can include files changed since a git ref", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test User"], {
+      cwd: tempDir,
+    });
+
+    await writeFixtureFile(tempDir, "src/base.ts", "export const base = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: tempDir });
+    await execFileAsync("git", ["branch", "main"], { cwd: tempDir });
+
+    await writeFixtureFile(tempDir, "src/feature.ts", "export const feature = true;");
+    await execFileAsync("git", ["add", "."], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "feature"], { cwd: tempDir });
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "since",
+      since: "main",
+    });
+
+    const paths = result.files.map((file) => file.relativePath);
+    expect(paths).toEqual(["src/feature.ts"]);
+  });
+
+  test("runExtendedPhaseOne can write skeleton content", async () => {
+    const tempDir = await makeTempDir();
+    tempDirs.push(tempDir);
+
+    await writeFixtureFile(
+      tempDir,
+      "src/feature.ts",
+      [
+        "export function feature(value: string) {",
+        "  return value.toUpperCase();",
+        "}",
+      ].join("\n"),
+    );
+
+    const result = await runExtendedPhaseOne({
+      cwd: tempDir,
+      outputFileName: "skeleton",
+      skeleton: true,
+    });
+
+    const content = await readFile(result.summaryPath, "utf-8");
+    expect(content).toContain("export function feature(value: string) { ... }");
+    expect(content).not.toContain("toUpperCase");
   });
 });

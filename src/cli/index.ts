@@ -1,4 +1,5 @@
 import process from "node:process";
+import chalk from "chalk";
 import { Command } from "commander";
 import { discoverFiles } from "../core/extended/foundation/discovery.js";
 import {
@@ -22,6 +23,11 @@ const program = new Command();
 
 type RunOptions = {
   output?: string;
+  changedOnly?: boolean;
+  stagedOnly?: boolean;
+  stashRef?: string;
+  since?: string;
+  skeleton?: boolean;
 };
 
 type ParsedOptions = {
@@ -31,10 +37,23 @@ type ParsedOptions = {
   "32k"?: boolean;
   "64k"?: boolean;
   "128k"?: boolean;
+  changed?: boolean;
+  staged?: boolean;
+  stash?: string | boolean;
+  since?: string;
+  skeleton?: boolean;
 };
 
 function formatCurrency(value: number): string {
-  return `$${value.toFixed(6)}`;
+  return chalk.green(`$${value.toFixed(6)}`);
+}
+
+function section(title: string): void {
+  console.log(chalk.bold.cyan(`\n${title}`));
+}
+
+function metric(label: string, value: string | number): void {
+  console.log(`${chalk.dim(label.padEnd(28))} ${chalk.white(String(value))}`);
 }
 
 function printModelCostTable(
@@ -90,20 +109,22 @@ function printModelCostTable(
     return `| ${values.model.padEnd(widths.model)} | ${values.input.padEnd(widths.input)} | ${values.output.padEnd(widths.output)} | ${values.notes.padEnd(widths.notes)} |`;
   };
 
-  console.log(divider);
+  console.log(chalk.dim(divider));
   console.log(
-    formatRow({
-      model: header.model,
-      input: header.input,
-      output: header.output,
-      notes: header.notes,
-    }),
+    chalk.bold(
+      formatRow({
+        model: header.model,
+        input: header.input,
+        output: header.output,
+        notes: header.notes,
+      }),
+    ),
   );
-  console.log(divider);
+  console.log(chalk.dim(divider));
   for (const row of tableRows) {
     console.log(formatRow(row));
   }
-  console.log(divider);
+  console.log(chalk.dim(divider));
 }
 
 async function runLegacy(options: RunOptions): Promise<void> {
@@ -137,50 +158,69 @@ async function runExtended(
   splitBudget?: SplitTokenBudget,
 ): Promise<void> {
   const cwd = process.cwd();
-  console.log("Running Extended Phase 1 pipeline\n");
-  console.log(`Reading files for ${cwd}\n`);
+  console.log(chalk.bold.cyan("Kontxt extended pipeline"));
+  console.log(`${chalk.dim("Repository")} ${cwd}`);
 
   const result = await runExtendedPhaseOne({
     cwd,
     outputFileName: options.output,
     splitBudget,
+    changedOnly: options.changedOnly,
+    stagedOnly: options.stagedOnly,
+    stashRef: options.stashRef,
+    since: options.since,
+    skeleton: options.skeleton,
   });
 
-  console.log("\n=============================");
-  if (result.outputMode === "split") {
-    console.log(`Split Directory: ${result.splitDirectory}`);
-    console.log(`Split Budget: ${formatSplitBudgetLabel(result.splitBudget)}`);
-    console.log(`Summary Parts: ${result.summaryPaths.length}`);
-  } else {
-    console.log(`Summary File: ${result.summaryPath}`);
+  section("Run summary");
+  if (options.changedOnly) {
+    metric("Input scope", "changed git files");
   }
-  console.log(`Total Files Processed: ${result.report.processedFiles}`);
-  console.log(`Total Codebase Tokens: ${result.report.totalTokens}`);
-  console.log(
-    `Estimated Input Cost (USD, ${result.report.costModel}): ${result.report.estimatedInputCostUsd}`,
+  if (options.stagedOnly) {
+    metric("Input scope", "staged git files");
+  }
+  if (options.stashRef !== undefined) {
+    metric("Input scope", `git stash ${options.stashRef}`);
+  }
+  if (options.since !== undefined) {
+    metric("Input scope", `git files since ${options.since}`);
+  }
+  if (options.skeleton) {
+    metric("Content mode", "skeleton");
+  }
+  if (result.outputMode === "split") {
+    metric("Split directory", result.splitDirectory);
+    metric("Split budget", formatSplitBudgetLabel(result.splitBudget));
+    metric("Summary parts", result.summaryPaths.length);
+  } else {
+    metric("Summary file", result.summaryPath);
+  }
+  metric("Files processed", result.report.processedFiles);
+  metric("Codebase tokens", result.report.totalTokens);
+  metric(
+    `Input cost (${result.report.costModel})`,
+    `$${result.report.estimatedInputCostUsd}`,
   );
-  console.log(`Skipped Files: ${result.report.skippedCount}`);
-  console.log(`Errors: ${result.report.errorCount}`);
-  console.log("=============================\n");
+  metric("Skipped files", result.report.skippedCount);
+  metric("Errors", result.report.errorCount);
 
-  console.log("Model cost estimates (USD for current token count):");
+  section("Model cost estimates");
   printModelCostTable(result.report.modelCosts);
-  console.log("");
 
   if (result.report.excludedFiles.length > 0) {
-    console.log("Excluded files:");
+    section("Excluded files");
     for (const excluded of result.report.excludedFiles) {
-      console.log(`- ${excluded.path} (${excluded.reason})`);
+      console.log(
+        `${chalk.yellow("-")} ${excluded.path} ${chalk.dim(`(${excluded.reason})`)}`,
+      );
     }
-    console.log("");
   }
 
   if (result.report.errors.length > 0) {
-    console.log("Read errors:");
+    section("Read errors");
     for (const errored of result.report.errors) {
-      console.log(`- ${errored.path}: ${errored.error}`);
+      console.log(`${chalk.red("-")} ${errored.path}: ${errored.error}`);
     }
-    console.log("");
   }
 }
 
@@ -190,7 +230,7 @@ async function runTreeOnly(): Promise<void> {
   const treePaths = filterTreePaths(discovered);
   const tree = formatExtendedTree(treePaths);
 
-  console.log("Repository Tree\n");
+  section("Repository tree");
   if (tree.length === 0) {
     console.log("(no files found)");
     return;
@@ -201,12 +241,17 @@ async function runTreeOnly(): Promise<void> {
 program
   .name("kontxt")
   .description("Package any codebase into AI-ready context")
-  .version("0.0.1")
+  .version("0.1.1")
   .option("-e", "Run extended foundation pipeline")
   .option("-t", "Print repository tree only in terminal")
   .option("--32k", "Split extended summary output into 32k token parts")
   .option("--64k", "Split extended summary output into 64k token parts")
   .option("--128k", "Split extended summary output into 128k token parts")
+  .option("--changed", "Only include changed, staged, and untracked git files")
+  .option("--staged", "Only include staged git files")
+  .option("--stash [ref]", "Only include files from a git stash ref")
+  .option("--since <ref>", "Only include files changed since a git ref")
+  .option("--skeleton", "Use lightweight JS/TS skeletons where supported")
   .option(
     "-o, --output [name]",
     "Generate summary in .kontxt/ (optional custom file name)",
@@ -223,6 +268,13 @@ function printUtilityInfo(): void {
   console.log(
     "Use `kontxt -e --32k`, `--64k`, or `--128k` to export split summaries by token budget.",
   );
+  console.log("Use `kontxt -e --changed` to package only changed git files.");
+  console.log("Use `kontxt -e --staged` to package only staged git files.");
+  console.log(
+    "Use `kontxt -e --stash` to package files from latest git stash.",
+  );
+  console.log("Use `kontxt -e --since main` to package branch-diff files.");
+  console.log("Use `kontxt -e --skeleton` to package JS/TS skeleton context.");
   console.log("Use `kontxt -t` to print only the repository tree.");
   console.log("Use `kontxt --help` to see all available options.");
 }
@@ -265,8 +317,30 @@ async function main(): Promise<void> {
       throw new Error("Split token flags cannot be combined with -o/--output.");
     }
 
+    const gitScopeCount = [
+      options.changed,
+      options.staged,
+      options.stash !== undefined,
+      options.since !== undefined,
+    ].filter(Boolean).length;
+    if (gitScopeCount > 1) {
+      throw new Error(
+        "Use only one git scope flag: --changed, --staged, --stash, or --since.",
+      );
+    }
+
     const normalizedOptions: RunOptions = {
       output: typeof options.output === "string" ? options.output : undefined,
+      changedOnly: options.changed,
+      stagedOnly: options.staged,
+      stashRef:
+        options.stash === true
+          ? "stash@{0}"
+          : typeof options.stash === "string"
+            ? options.stash
+            : undefined,
+      since: options.since,
+      skeleton: options.skeleton,
     };
 
     if (options.t) {

@@ -17,6 +17,11 @@ export type SplitSummaryOutput = {
   paths: string[];
 };
 
+export type SummaryMode = {
+  scope?: string;
+  skeleton?: boolean;
+};
+
 const SPLIT_DIRECTORY_NAMES: Record<SplitTokenBudget, string> = {
   32000: "32k-token",
   64000: "64k-token",
@@ -33,11 +38,38 @@ function hasControlCharacters(value: string): boolean {
   return false;
 }
 
-export function resolveSummaryFileName(outputFileName?: string): string {
+function formatDatePrefix(): string {
+  const date = new Date();
+  return `${date.getDate()}-${date.getMonth() + 1}-${date.getFullYear()}`;
+}
+
+function sanitizeModePart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function formatSummaryModeLabel(mode: SummaryMode = {}): string {
+  const parts = [mode.scope, mode.skeleton ? "skeleton" : undefined]
+    .filter((part): part is string => part !== undefined && part.trim() !== "")
+    .map(sanitizeModePart)
+    .filter((part) => part.length > 0);
+
+  if (parts.length === 0) {
+    return "full";
+  }
+
+  return parts.join("-");
+}
+
+export function resolveSummaryFileName(
+  outputFileName?: string,
+  mode: SummaryMode = {},
+): string {
   if (!outputFileName) {
-    const date = new Date();
-    const dateString = `${date.getDate()}-${date.getMonth() + 1}-${date.getFullYear()}`;
-    return `${dateString}-summary.md`;
+    return `${formatDatePrefix()}-${formatSummaryModeLabel(mode)}-summary.md`;
   }
 
   const trimmedName = outputFileName.trim();
@@ -71,9 +103,10 @@ export async function writeSummaryFile(
   basedir: string,
   content: string,
   outputFileName?: string,
+  mode?: SummaryMode,
 ): Promise<string> {
   await ensureKontxtIgnoreFile(basedir);
-  const fileName = resolveSummaryFileName(outputFileName);
+  const fileName = resolveSummaryFileName(outputFileName, mode);
   const kontxtDir = join(basedir, ".kontxt");
   const summaryFilePath = join(kontxtDir, fileName);
   await mkdir(kontxtDir, { recursive: true });
@@ -152,6 +185,7 @@ export async function writeSplitSummaryFiles(
   basedir: string,
   files: FileEntry[],
   budget: SplitTokenBudget,
+  mode: SummaryMode = {},
 ): Promise<SplitSummaryOutput> {
   await ensureKontxtIgnoreFile(basedir);
 
@@ -166,8 +200,9 @@ export async function writeSplitSummaryFiles(
   await deleteExistingMarkdownFiles(splitDirectory);
 
   const paths: string[] = [];
+  const modeLabel = formatSummaryModeLabel(mode);
   for (const [index, content] of contents.entries()) {
-    const fileName = `part-${String(index + 1).padStart(3, "0")}.md`;
+    const fileName = `${formatDatePrefix()}-${modeLabel}-part-${String(index + 1).padStart(3, "0")}.md`;
     const filePath = join(splitDirectory, fileName);
     await writeFile(filePath, content, "utf-8");
     paths.push(filePath);
